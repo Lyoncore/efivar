@@ -227,8 +227,31 @@ get_partition_info(int fd, uint32_t options,
 	return rc;
 }
 
+static int
+get_partition_info_from_udev(const char *devpath, uint32_t options,
+		   uint32_t part, uint64_t *start, uint64_t *size,
+		   uint8_t *signature, uint8_t *mbr_type,
+		   uint8_t *signature_type)
+{
+	/* FIXME: support GPT partition only */
+	int gpt_invalid=0;
+	int rc=0;
+
+	gpt_invalid = gpt_disk_get_partition_info_udev(devpath, part,
+						  start, size,
+						  signature,
+						  mbr_type,
+						  signature_type,
+			(options & EFIBOOT_OPTIONS_IGNORE_PMBR_ERR)?1:0);
+	if (gpt_invalid < 0) {
+		efi_error("GPT is invalid");
+		rc = -1;
+	}
+	return rc;
+}
+
 bool HIDDEN
-is_partitioned(int fd)
+is_partitioned(const char *devpath)
 {
 	int rc;
 	uint32_t options = 0;
@@ -236,7 +259,7 @@ is_partitioned(int fd)
 	uint64_t start = 0, size = 0;
 	uint8_t signature = 0, mbr_type = 0, signature_type = 0;
 
-	rc = get_partition_info(fd, options, part, &start, &size,
+	rc = get_partition_info_from_udev(devpath, options, part, &start, &size,
 				&signature, &mbr_type, &signature_type);
 	if (rc < 0)
 		return false;
@@ -271,4 +294,31 @@ make_hd_dn(uint8_t *buf, ssize_t size, int fd, int32_t partition,
 	return rc;
 }
 
+ssize_t HIDDEN
+make_hd_dn_udev(uint8_t *buf, ssize_t size, const char *devpath, int32_t partition,
+	   uint32_t options)
+{
+	uint64_t part_start=0, part_size = 0;
+	uint8_t signature[16]="", format=0, signature_type=0;
+	int rc;
+
+	errno = 0;
+
+	if (partition <= 0)
+		return 0;
+
+	rc = get_partition_info_from_udev(devpath, options, partition, &part_start,
+				&part_size, signature, &format,
+				&signature_type);
+	if (rc < 0) {
+		efi_error("could not get partition info");
+		return rc;
+	}
+
+	rc = efidp_make_hd(buf, size, partition, part_start, part_size,
+			   signature, format, signature_type);
+	if (rc < 0)
+		efi_error("could not make HD DP node");
+	return rc;
+}
 // vim:fenc=utf-8:tw=75:noet
